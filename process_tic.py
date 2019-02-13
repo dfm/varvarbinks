@@ -6,7 +6,7 @@ from __future__ import division, print_function
 
 def process_tic(ticid, sector=None, subsample=20, datadir="."):
     import os
-    cache_dir = "./theano_cache/{0}".format(os.getpid())
+    cache_dir = "{0}/theano_cache/{1}".format(datadir, os.getpid())
     os.environ["THEANO_FLAGS"] = \
         "compiledir={0}".format(cache_dir)
 
@@ -28,6 +28,9 @@ def process_tic(ticid, sector=None, subsample=20, datadir="."):
     # Output directory
     outdir = os.path.join(datadir, "results", "{0}".format(ticid))
     os.makedirs(outdir, exist_ok=True)
+
+    if os.path.exists(os.path.join(outdir, "summary.csv")):
+        return
 
     # Download the light curve
     download_dir = os.path.join(datadir, "lightkurve")
@@ -89,13 +92,16 @@ def process_tic(ticid, sector=None, subsample=20, datadir="."):
         pm.Deterministic("psd", kernel.psd(2*np.pi*freq))
 
         # Optimize to find the maximum a posteriori parameters
-        map_soln = xo.optimize(start=model.test_point, vars=[mean, logs2])
+        map_soln = xo.optimize(start=model.test_point, vars=[mean, logs2],
+                               verbose=False)
         map_soln = xo.optimize(start=map_soln, vars=[mean, logs2, logpower1,
-                                                     logw1])
-        map_soln = xo.optimize(start=map_soln)
+                                                     logw1],
+                               verbose=False)
+        map_soln = xo.optimize(start=map_soln, verbose=False)
 
         # Run autodiff VI
-        approx = pm.fit(n=10000, method="fullrank_advi", start=map_soln)
+        approx = pm.fit(n=10000, method="fullrank_advi", start=map_soln,
+                        progressbar=False)
         trace = approx.sample(5000)
 
     # Save the trace and summary
@@ -133,16 +139,29 @@ def process_tic(ticid, sector=None, subsample=20, datadir="."):
 
 
 if __name__ == "__main__":
-    import sys
-    if len(sys.argv) >= 2:
-        for ticid in sys.argv[1:]:
-            process_tic(ticid)
+    import tqdm
+    import argparse
+    from functools import partial
+    from multiprocessing import Pool
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("ticids", type=int, nargs="*",
+                        help="a list of ticids")
+    parser.add_argument("-o", "--outdir", default=".",
+                        help="output directory")
+    parser.add_argument("-s", "--sector", type=int, default=None,
+                        help="sector number")
+    args = parser.parse_args()
+
+    if len(args.ticids):
+        ticids = list(args.ticids)
     else:
-        import random
         with open("output3.txt", "r") as f:
             ticids = [int(l.split("/")[-1].split("-")[2]) for l in f
                       if ".fits" in l]
             ticids = list(sorted(set(ticids)))
-        ticid = random.choice(ticids)
-        print(ticid)
-        process_tic(ticid)
+
+    func = partial(process_tic, datadir=args.outdir, sector=args.sector)
+
+    with Pool(8) as pool:
+        list(tqdm.tqdm(pool.map(func, ticids), total=len(ticids)))
