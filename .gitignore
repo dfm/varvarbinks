@@ -2,3 +2,5 @@ theano_cache
 *.ipynb
 lightkurve
 results
+remote
+exo_CTL_07.02xTIC_v7.csv
