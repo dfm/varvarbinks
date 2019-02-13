@@ -1,0 +1,4 @@
+theano_cache
+*.ipynb
+lightkurve
+results
